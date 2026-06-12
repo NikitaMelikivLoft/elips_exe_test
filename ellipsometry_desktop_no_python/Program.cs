@@ -15,8 +15,31 @@ internal static class Program
     [STAThread]
     private static void Main()
     {
-        ApplicationConfiguration.Initialize();
-        Application.Run(new MainForm());
+        try
+        {
+            ApplicationConfiguration.Initialize();
+            Application.Run(new MainForm());
+        }
+        catch (Exception ex)
+        {
+            try
+            {
+                var dir = Path.Combine(AppContext.BaseDirectory, "outputs");
+                Directory.CreateDirectory(dir);
+                File.WriteAllText(Path.Combine(dir, "error.log"), ex.ToString(), Encoding.UTF8);
+            }
+            catch
+            {
+                // ignored
+            }
+
+            MessageBox.Show(
+                "Программа не смогла запуститься.\n\n" + ex.Message + "\n\nПодробности сохранены в outputs/error.log",
+                "Ошибка запуска",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Error
+            );
+        }
     }
 }
 
@@ -43,8 +66,6 @@ public sealed class CalcRow
     public int D { get; init; }
     public Complex Beta { get; init; }
     public Complex Q { get; init; }
-    public Complex Rs { get; init; }
-    public Complex Rp { get; init; }
     public Complex Rho { get; init; }
     public double Psi { get; init; }
     public double Delta { get; init; }
@@ -86,29 +107,29 @@ public sealed class MainForm : Form
         ["W"] = new("W", "W / Tungsten", 3.63739, 2.916877),
     };
 
-    private readonly TextBox _psi = new();
-    private readonly TextBox _delta = new();
-    private readonly TextBox _lambda = new();
-    private readonly TextBox _theta = new();
-    private readonly TextBox _dMin = new();
-    private readonly TextBox _dMax = new();
-    private readonly TextBox _step = new();
+    private readonly TextBox _psi = Entry();
+    private readonly TextBox _delta = Entry();
+    private readonly TextBox _lambda = Entry();
+    private readonly TextBox _theta = Entry();
+    private readonly TextBox _dMin = Entry();
+    private readonly TextBox _dMax = Entry();
+    private readonly TextBox _step = Entry();
 
     private readonly CheckBox _useDb = new() { Text = "Использовать встроенную базу материалов", Checked = true, AutoSize = true };
 
-    private readonly ComboBox _m0 = new();
-    private readonly ComboBox _m1 = new();
-    private readonly ComboBox _m2 = new();
+    private readonly ComboBox _m0 = Combo();
+    private readonly ComboBox _m1 = Combo();
+    private readonly ComboBox _m2 = Combo();
 
-    private readonly TextBox _n0 = new();
-    private readonly TextBox _k0 = new();
-    private readonly TextBox _n1 = new();
-    private readonly TextBox _k1 = new();
-    private readonly TextBox _n2 = new();
-    private readonly TextBox _k2 = new();
+    private readonly TextBox _n0 = Entry();
+    private readonly TextBox _k0 = Entry();
+    private readonly TextBox _n1 = Entry();
+    private readonly TextBox _k1 = Entry();
+    private readonly TextBox _n2 = Entry();
+    private readonly TextBox _k2 = Entry();
 
-    private readonly TextBox _resultBox = new();
-    private readonly TextBox _constantsBox = new();
+    private readonly TextBox _resultBox = new() { Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical, Dock = DockStyle.Fill, Font = new Font("Consolas", 11, FontStyle.Bold) };
+    private readonly TextBox _constantsBox = new() { Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical, Dock = DockStyle.Fill, Font = new Font("Consolas", 11) };
     private readonly DataGridView _grid = new();
 
     private CalcResult? _lastResult;
@@ -118,11 +139,14 @@ public sealed class MainForm : Form
         Text = "Эллиптический метод расчёта d";
         StartPosition = FormStartPosition.CenterScreen;
         MinimumSize = new Size(1050, 720);
-        Size = new Size(1200, 820);
+        Size = new Size(1180, 780);
 
         BuildUi();
         ClearFields();
     }
+
+    private static TextBox Entry() => new() { Dock = DockStyle.Fill };
+    private static ComboBox Combo() => new() { Dock = DockStyle.Fill, DropDownStyle = ComboBoxStyle.DropDownList };
 
     private void BuildUi()
     {
@@ -138,14 +162,12 @@ public sealed class MainForm : Form
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         Controls.Add(root);
 
-        var title = new Label
+        root.Controls.Add(new Label
         {
             Text = "Эллиптический метод расчёта d",
             Font = new Font("Segoe UI", 20, FontStyle.Bold),
-            AutoSize = true,
-            Dock = DockStyle.Fill
-        };
-        root.Controls.Add(title, 0, 0);
+            AutoSize = true
+        }, 0, 0);
 
         var buttons = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, Padding = new Padding(0, 8, 0, 8) };
         root.Controls.Add(buttons, 0, 1);
@@ -157,26 +179,31 @@ public sealed class MainForm : Form
         AddButton(buttons, "Рассчитать", (_, _) => CalculateAndRender());
         AddButton(buttons, "Сохранить CSV в outputs", (_, _) => SaveCsv());
 
-        var outputsLabel = new Label
+        buttons.Controls.Add(new Label
         {
-            Text = $"Папка сохранения: {OutputsDir()}",
+            Text = $"Папка сохранения: {OutputsDir().FullName}",
             AutoSize = true,
-            TextAlign = ContentAlignment.MiddleLeft,
             Padding = new Padding(12, 9, 0, 0)
-        };
-        buttons.Controls.Add(outputsLabel);
+        });
 
-        var main = new SplitContainer
+        // Вместо SplitContainer используется TableLayoutPanel: он не падает на старте из-за SplitterDistance.
+        var main = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
-            SplitterDistance = 390,
-            Panel1MinSize = 350,
-            Panel2MinSize = 560
+            ColumnCount = 2,
+            RowCount = 1
         };
+        main.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 410));
+        main.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         root.Controls.Add(main, 0, 2);
 
-        BuildLeft(main.Panel1);
-        BuildRight(main.Panel2);
+        var left = new Panel { Dock = DockStyle.Fill, AutoScroll = true, Padding = new Padding(0, 0, 10, 0) };
+        var right = new Panel { Dock = DockStyle.Fill };
+        main.Controls.Add(left, 0, 0);
+        main.Controls.Add(right, 1, 0);
+
+        BuildLeft(left);
+        BuildRight(right);
     }
 
     private static void AddButton(Control parent, string text, EventHandler onClick)
@@ -188,17 +215,17 @@ public sealed class MainForm : Form
 
     private void BuildLeft(Control parent)
     {
-        var left = new FlowLayoutPanel
+        var stack = new FlowLayoutPanel
         {
             Dock = DockStyle.Fill,
             FlowDirection = FlowDirection.TopDown,
             WrapContents = false,
             AutoScroll = true
         };
-        parent.Controls.Add(left);
+        parent.Controls.Add(stack);
 
-        var data = Group("Дано", 360, 235);
-        left.Controls.Add(data);
+        var data = Group("Дано", 380, 230);
+        stack.Controls.Add(data);
 
         var dataGrid = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 7, Padding = new Padding(8) };
         dataGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
@@ -213,19 +240,18 @@ public sealed class MainForm : Form
         AddField(dataGrid, "d max, нм", _dMax, 4, 1);
         AddField(dataGrid, "шаг, нм", _step, 6, 0);
 
-        var materials = Group("Материалы", 360, 255);
-        left.Controls.Add(materials);
+        var mats = Group("Материалы", 380, 255);
+        stack.Controls.Add(mats);
 
         var matPanel = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 7, Padding = new Padding(8) };
-        materials.Controls.Add(matPanel);
-
+        mats.Controls.Add(matPanel);
         matPanel.Controls.Add(_useDb, 0, 0);
         AddCombo(matPanel, "Среда 0", _m0, 1);
         AddCombo(matPanel, "Плёнка 1", _m1, 3);
         AddCombo(matPanel, "Подложка 2", _m2, 5);
 
-        var manual = Group("Ручной ввод n,k", 360, 250);
-        left.Controls.Add(manual);
+        var manual = Group("Ручной ввод n,k", 380, 250);
+        stack.Controls.Add(manual);
 
         var manGrid = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 6, Padding = new Padding(8) };
         manGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
@@ -249,13 +275,8 @@ public sealed class MainForm : Form
 
         var resultGroup = Group("Результат", 0, 0);
         resultGroup.Dock = DockStyle.Fill;
-        right.Controls.Add(resultGroup, 0, 0);
-
-        _resultBox.Dock = DockStyle.Fill;
-        _resultBox.Multiline = true;
-        _resultBox.ScrollBars = ScrollBars.Vertical;
-        _resultBox.Font = new Font("Consolas", 11, FontStyle.Bold);
         resultGroup.Controls.Add(_resultBox);
+        right.Controls.Add(resultGroup, 0, 0);
 
         var tabs = new TabControl { Dock = DockStyle.Fill };
         right.Controls.Add(tabs, 0, 1);
@@ -276,37 +297,26 @@ public sealed class MainForm : Form
         foreach (var name in new[] { "d", "β", "q", "ρ", "Ψ", "Δ", "δΔ", "F" })
             _grid.Columns.Add(name, name);
 
-        _constantsBox.Dock = DockStyle.Fill;
-        _constantsBox.Multiline = true;
-        _constantsBox.ScrollBars = ScrollBars.Vertical;
-        _constantsBox.Font = new Font("Consolas", 11);
         tabConst.Controls.Add(_constantsBox);
     }
 
-    private GroupBox Group(string title, int width, int height)
+    private static GroupBox Group(string title, int width, int height) => new()
     {
-        return new GroupBox
-        {
-            Text = title,
-            Width = width > 0 ? width : 360,
-            Height = height > 0 ? height : 120,
-            Margin = new Padding(0, 0, 0, 10)
-        };
-    }
+        Text = title,
+        Width = width > 0 ? width : 360,
+        Height = height > 0 ? height : 120,
+        Margin = new Padding(0, 0, 0, 10)
+    };
 
     private static void AddField(TableLayoutPanel panel, string label, TextBox textBox, int row, int col)
     {
-        textBox.Dock = DockStyle.Fill;
         panel.Controls.Add(new Label { Text = label, Dock = DockStyle.Fill, AutoSize = true }, col, row);
         panel.Controls.Add(textBox, col, row + 1);
     }
 
     private void AddCombo(TableLayoutPanel panel, string label, ComboBox combo, int row)
     {
-        combo.Dock = DockStyle.Fill;
-        combo.DropDownStyle = ComboBoxStyle.DropDownList;
         combo.Items.Clear();
-
         foreach (var key in _materials.Keys.OrderBy(k => _materials[k].Label))
             combo.Items.Add(_materials[key]);
 
@@ -326,10 +336,7 @@ public sealed class MainForm : Form
         }
     }
 
-    private string SelectedKey(ComboBox combo)
-    {
-        return combo.SelectedItem is Material m ? m.Key : "Air";
-    }
+    private string SelectedKey(ComboBox combo) => combo.SelectedItem is Material m ? m.Key : "Air";
 
     private void ClearFields()
     {
@@ -349,14 +356,7 @@ public sealed class MainForm : Form
 
     private void LoadExample(int n)
     {
-        var ex = n switch
-        {
-            1 => Example1(),
-            2 => Example2(),
-            3 => Example3(),
-            _ => Example3()
-        };
-
+        var ex = n switch { 1 => Example1(), 2 => Example2(), _ => Example3() };
         _useDb.Checked = false;
 
         _psi.Text = ex["psi"];
@@ -405,29 +405,25 @@ public sealed class MainForm : Form
         ["n0"] = "1", ["k0"] = "0", ["n1"] = "2.00", ["k1"] = "0", ["n2"] = "3.881", ["k2"] = "0.019"
     };
 
-    private Dictionary<string, string> Params()
+    private Dictionary<string, string> Params() => new()
     {
-        return new()
-        {
-            ["psi"] = Clean(_psi.Text),
-            ["delta"] = Clean(_delta.Text),
-            ["lam"] = Clean(_lambda.Text),
-            ["theta"] = Clean(_theta.Text),
-            ["dmin"] = Clean(_dMin.Text),
-            ["dmax"] = Clean(_dMax.Text),
-            ["step"] = Clean(_step.Text),
-            ["m0"] = SelectedKey(_m0),
-            ["m1"] = SelectedKey(_m1),
-            ["m2"] = SelectedKey(_m2),
-            ["n0"] = Clean(_n0.Text),
-            ["k0"] = Clean(_k0.Text),
-            ["n1"] = Clean(_n1.Text),
-            ["k1"] = Clean(_k1.Text),
-            ["n2"] = Clean(_n2.Text),
-            ["k2"] = Clean(_k2.Text),
-            ["use_db"] = _useDb.Checked ? "1" : "0"
-        };
-    }
+        ["psi"] = Clean(_psi.Text),
+        ["delta"] = Clean(_delta.Text),
+        ["lam"] = Clean(_lambda.Text),
+        ["theta"] = Clean(_theta.Text),
+        ["dmin"] = Clean(_dMin.Text),
+        ["dmax"] = Clean(_dMax.Text),
+        ["step"] = Clean(_step.Text),
+        ["m0"] = SelectedKey(_m0),
+        ["m1"] = SelectedKey(_m1),
+        ["m2"] = SelectedKey(_m2),
+        ["n0"] = Clean(_n0.Text),
+        ["k0"] = Clean(_k0.Text),
+        ["n1"] = Clean(_n1.Text),
+        ["k1"] = Clean(_k1.Text),
+        ["n2"] = Clean(_n2.Text),
+        ["k2"] = Clean(_k2.Text),
+    };
 
     private static string Clean(string s) => s.Trim().Replace(",", ".");
 
@@ -435,28 +431,13 @@ public sealed class MainForm : Form
     {
         try
         {
-            var p = Params();
-            var dict = p.ToDictionary(kv => kv.Key, kv => (object)kv.Value);
-            var calcParams = new Dictionary<string, object>();
-            foreach (var kv in p) calcParams[kv.Key] = kv.Value;
-            calcParams["use_db"] = _useDb.Checked;
-
-            _lastResult = Compute(calcParams);
+            _lastResult = CalculateCore(Params(), _useDb.Checked);
             Render(_lastResult);
         }
         catch (Exception ex)
         {
             MessageBox.Show(ex.Message, "Ошибка расчёта", MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
-    }
-
-    private CalcResult Compute(Dictionary<string, object> p)
-    {
-        var stringParams = p.ToDictionary(k => k.Key, v => Convert.ToString(v.Value, CultureInfo.InvariantCulture) ?? "");
-        stringParams["use_db"] = (bool)p["use_db"] ? "1" : "0";
-
-        var calcParams = new Dictionary<string, object>(p);
-        return CalculateCore(stringParams, (bool)p["use_db"]);
     }
 
     private CalcResult CalculateCore(Dictionary<string, string> p, bool useDb)
@@ -535,23 +516,10 @@ public sealed class MainForm : Form
             double dDelta = CyclicDelta(delta, deltaExp);
             double f = Math.Pow(psi - psiExp, 2) + Math.Pow(dDelta, 2);
 
-            rows.Add(new CalcRow
-            {
-                D = d,
-                Beta = beta,
-                Q = q,
-                Rs = rs,
-                Rp = rp,
-                Rho = rho,
-                Psi = psi,
-                Delta = delta,
-                DeltaDelta = dDelta,
-                F = f
-            });
+            rows.Add(new CalcRow { D = d, Beta = beta, Q = q, Rho = rho, Psi = psi, Delta = delta, DeltaDelta = dDelta, F = f });
         }
 
-        if (rows.Count == 0)
-            throw new InvalidOperationException("Пустой диапазон d.");
+        if (rows.Count == 0) throw new InvalidOperationException("Пустой диапазон d.");
 
         return new CalcResult
         {
@@ -603,16 +571,7 @@ public sealed class MainForm : Form
         _grid.Rows.Clear();
         foreach (var r in result.Rows)
         {
-            _grid.Rows.Add(
-                r.D,
-                FmtC(r.Beta, 5),
-                FmtC(r.Q, 5),
-                FmtC(r.Rho, 5),
-                Fmt(r.Psi),
-                Fmt(r.Delta),
-                Fmt(r.DeltaDelta),
-                Fmt(r.F, 8)
-            );
+            _grid.Rows.Add(r.D, FmtC(r.Beta, 5), FmtC(r.Q, 5), FmtC(r.Rho, 5), Fmt(r.Psi), Fmt(r.Delta), Fmt(r.DeltaDelta), Fmt(r.F, 8));
         }
 
         var c = result.Constants;
@@ -645,8 +604,7 @@ public sealed class MainForm : Form
 
     private static DirectoryInfo OutputsDir()
     {
-        var baseDir = AppContext.BaseDirectory;
-        var path = Path.Combine(baseDir, "outputs");
+        var path = Path.Combine(AppContext.BaseDirectory, "outputs");
         Directory.CreateDirectory(path);
         return new DirectoryInfo(path);
     }
@@ -659,8 +617,7 @@ public sealed class MainForm : Form
             return;
         }
 
-        var dir = OutputsDir().FullName;
-        var file = Path.Combine(dir, $"ellipsometry_results_{DateTime.Now:yyyyMMdd_HHmmss}.csv");
+        var file = Path.Combine(OutputsDir().FullName, $"ellipsometry_results_{DateTime.Now:yyyyMMdd_HHmmss}.csv");
 
         using var writer = new StreamWriter(file, false, new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
         writer.WriteLine("sep=;");
@@ -669,12 +626,10 @@ public sealed class MainForm : Form
         foreach (var r in _lastResult.Rows)
         {
             writer.WriteLine(string.Join(";",
-                Inv(r.D),
-                Inv(r.Beta.Real), Inv(r.Beta.Imaginary),
+                Inv(r.D), Inv(r.Beta.Real), Inv(r.Beta.Imaginary),
                 Inv(r.Q.Real), Inv(r.Q.Imaginary),
                 Inv(r.Rho.Real), Inv(r.Rho.Imaginary),
-                Inv(r.Psi), Inv(r.Delta), Inv(r.DeltaDelta),
-                Inv(r.F)
+                Inv(r.Psi), Inv(r.Delta), Inv(r.DeltaDelta), Inv(r.F)
             ));
         }
 
