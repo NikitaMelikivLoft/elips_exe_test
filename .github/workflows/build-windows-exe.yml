@@ -10,7 +10,7 @@ jobs:
     runs-on: windows-latest
 
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Setup .NET
@@ -19,12 +19,21 @@ jobs:
           dotnet-version: 8.0.x
 
       - name: Publish self-contained EXE
+        shell: pwsh
         run: |
-          dotnet publish EllipsometrySolver.csproj -c Release -r win-x64 --self-contained true /p:PublishSingleFile=true /p:EnableCompressionInSingleFile=true /p:IncludeNativeLibrariesForSelfExtract=true
-          mkdir bin\Release\net8.0-windows\win-x64\publish\outputs
+          dotnet publish ellipsometry_desktop_no_python/EllipsometrySolver.csproj `
+            -c Release `
+            -r win-x64 `
+            --self-contained true `
+            /p:PublishSingleFile=true `
+            /p:EnableCompressionInSingleFile=true `
+            /p:IncludeNativeLibrariesForSelfExtract=true `
+            -o publish
+
+          New-Item -ItemType Directory -Force -Path publish/outputs
 
       - name: Upload EXE artifact
         uses: actions/upload-artifact@v4
         with:
           name: EllipsometrySolver-win-x64
-          path: bin/Release/net8.0-windows/win-x64/publish/
+          path: publish/
